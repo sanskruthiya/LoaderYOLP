@@ -1,14 +1,16 @@
 import requests
 import time
+import glob
 import sys
 import csv
+import os
 
 #ベースとなるURL
 base_url = "https://map.yahooapis.jp/search/local/V1/localSearch"
 
 api_key = input("APIキー（Client ID）を入力: ") #コマンドライン上でAPIキーの入力を求める
 
-#都道府県コードの辞書を定義（都道府県や市区町村コードを入力しない場合、全国分を繰り返し処理で取得するため）
+#都道府県の住所コードを辞書で定義（都道府県や市区町村の住所コードを入力しない場合、全国分を繰り返し処理で取得するため）
 prefectures = {
     "01": "北海道", "02": "青森県", "03": "岩手県", "04": "宮城県", "05": "秋田県", 
     "06": "山形県", "07": "福島県", "08": "茨城県", "09": "栃木県", "10": "群馬県",
@@ -41,14 +43,8 @@ if p_gc != "":
 else:
     pass
 
-p_ac = input('検索する都道府県または市区町村コードを入力（Enterキーでスキップ） >> ')
-#都道府県コードが入力された場合
-if p_ac:
-    #入力されたコードが辞書にあるか確認
-    if p_ac not in prefectures:
-        print("無効なコードです。入力値をご確認ください。（例：北海道 => 01）")
-        sys.exit()
-    #有効なコードが入力されていたらパラメータに格納
+p_ac = input('検索する住所コードを入力（Enterキーでスキップ） >> ')
+if p_ac != "":   
     params_01['ac'] = str(p_ac)
     params_02['ac'] = str(p_ac)
 else:
@@ -61,13 +57,13 @@ def count_data(params_01):
     return jsonData_01["ResultInfo"]["Total"]
 
 #データ取得処理用の関数
-def fetch_data(params_02, total_num, pref_name):
-    max_return = 100  #APIの仕様では一回のリクエストにつき100件まで取得可能なので、その上限値を一回の取得数として設定
-    pages = (int(total_num) // int(max_return)) + 1  #全件を取得するために必要なリクエスト回数を算定
+def fetch_data(params_02, total_num, pref_name, output_dir):
+    max_return = 100 #APIの仕様では一回のリクエストにつき100件まで取得可能なので、その上限値を一回の取得数として設定
+    pages = (int(total_num) // int(max_return)) + 1 #全件を取得するために必要なリクエスト回数を算定
 
-    params_02['results'] = max_return  #全件取得用のパラメータを設定
+    params_02['results'] = max_return #全件取得用のパラメータを設定
 
-    Records = []  #取得データを格納するための空リストを用意
+    Records = [] #取得データを格納するための空リストを用意
 
     #全件取得するためのループ処理
     for i in range(pages):
@@ -84,32 +80,32 @@ def fetch_data(params_02, total_num, pref_name):
                 sys.exit() #ここでエラーが生じた場合は処理を終了させる。ここをcontinueに変えて、この100件分だけスキップして処理続行させることも可能。
         else:
             print("エラー:", response_02.status_code)
-            sys.exit() #ここでエラーが生じた場合は処理を終了させる。
+            sys.exit() #レスポンスが正常に取得できなかった場合は処理を終了させる。
 
-        #JSONデータ内の各発言データから必要項目を指定してリストに格納する
+        #JSONデータ内の各要素から必要項目を指定してリストに格納する
         for poi in jsonData_02.get('Feature', []):
-            poi_id = poi.get('Id', "") #FeatureにId項目があればその値を、ない場合は空欄を返す。
+            poi_id = poi.get('Id', "") #FeatureにId項目があればその値を、ない場合は空欄を返す
             poi_name = poi.get('Name', "")
-            coordinates = poi.get('Geometry', {}).get('Coordinates', "").split(",")
+            coordinates = poi.get('Geometry', {}).get('Coordinates', "").split(",") #Coordinatesの座標値はカンマ区切りで緯度経度に分割する
             poi_lat = coordinates[1] if len(coordinates) > 1 else ""
             poi_lng = coordinates[0] if len(coordinates) > 0 else ""
             Records.append([poi_id, poi_name, poi_lat, poi_lng])
 
-        sys.stdout.write(f"\r{pref_name}: {i+1}/{pages} is done.")  #進捗状況を表示する
+        sys.stdout.write(f"\r{pref_name}: {i+1}/{pages} is done.") #進捗状況を表示する
         sys.stdout.flush() #進捗状況を強制的に変更する
-        time.sleep(0.5)  #リクエスト１回ごとに若干時間をあけてAPI側への負荷を軽減する
+        time.sleep(0.5) #リクエスト１回ごとに若干時間をあけてAPI側への負荷を軽減する
 
     #CSVへの書き出し
-    csv_filename = f"poi_result_{pref_name}_{total_num}.csv"
-    with open(csv_filename, 'w', newline='', encoding='utf-8') as f:
-        csvwriter = csv.writer(f, delimiter=',', quotechar='"', quoting=csv.QUOTE_NONNUMERIC)  #CSVの書き出し方式を適宜指定
+    csv_file_path = os.path.join(output_dir, f"poi_result_{pref_name}_{total_num}.csv")
+    with open(csv_file_path, 'w', newline='', encoding='utf-8') as f:
+        csvwriter = csv.writer(f, delimiter=',', quotechar='"', quoting=csv.QUOTE_NONNUMERIC) #CSVの書き出し方式を適宜指定
         csvwriter.writerow(['ID', 'name', 'lat', 'lng'])
         for record in Records:
             csvwriter.writerow(record)
 
-    print(f"\nデータ（{pref_name}）がCSV形式で出力されました。ファイル名： {csv_filename}")
+    print(f"\nデータ（{pref_name}）がCSV形式で出力されました。ファイル名： {csv_file_path}")
 
-#都道府県コードが入力されなかった場合、全都道府県を対象に繰り返し処理を行う
+#住所コードが入力されなかった場合、全都道府県を対象に繰り返し処理を行う
 if not p_ac:
     #ヒット件数の確認用のリクエストを投げる処理
     try:
@@ -124,6 +120,10 @@ if not p_ac:
         sys.exit()
     else:
         pass
+
+    #出力先フォルダの設定
+    output_dir = "output_" + str(total_num_all)
+    os.makedirs(output_dir, exist_ok=True)
 
     #処理を続行する場合は、都道府県コードごとにデータ取得の繰り返し処理を実施する
     for pref_code, pref_name in prefectures.items(): #都道府県コードと名称をそれぞれ変数に格納
@@ -141,11 +141,32 @@ if not p_ac:
         if total_num_each > 3100:
             print(f"データ取得上限の件数を超えているか入力パラメータが不適なため、取得処理をスキップします ({pref_name})。この都道府県では市区町村コードなどで条件を細分化してください。")
         elif total_num_each > 0:
-            fetch_data(params_02, total_num_each, pref_name)
+            fetch_data(params_02, total_num_each, pref_name, output_dir)
         else:
             print(f"該当するデータがありません。（{pref_name}）")
 
-#都道府県コードが入力された場合、単一の都道府県で処理を行う
+    #取得した複数のCSVを一つにマージしたCSVファイルも作成するか確認
+    merge_input = input("取得したCSVを一つに統合する必要がなければ 1 を、統合したCSVも作成する場合はEnterキーまたはその他を押してください。 >> ")
+    if merge_input == "1":
+        pass
+    else:
+        #マージする場合の処理
+        merged_csv_path = os.path.join(output_dir, f"poi_merged_{total_num_all}.csv")
+        csv_files = glob.glob(os.path.join(output_dir, "poi_result_*.csv"))
+
+        with open(merged_csv_path, 'w', newline='', encoding='utf-8') as outputfile:
+            csvwriter = csv.writer(outputfile, delimiter=',', quotechar='"', quoting=csv.QUOTE_NONNUMERIC)
+            csvwriter.writerow(['ID', 'Name', 'Lat', 'Lng']) #ヘッダーを書き込む
+
+            for filename in csv_files:
+                with open(filename, 'r', newline='', encoding='utf-8') as inputfile:
+                    csvreader = csv.reader(inputfile)
+                    next(csvreader) #各CSVファイルのヘッダーをスキップ
+                    for row in csvreader:
+                        csvwriter.writerow(row)
+        print(f"\n統合データをCSV形式で出力しました。ファイル名： {merged_csv_path}")
+
+#住所コードが入力された場合、その住所コードとパラメータに従って処理を行う
 else:
     #ヒット件数の確認用のリクエストを投げる処理
     try:
@@ -161,10 +182,14 @@ else:
     else:
         pass
 
+    #出力先フォルダの設定
+    output_dir = "output_" + str(total_num)
+    os.makedirs(output_dir, exist_ok=True)
+    
     #ヒット件数が0件以上かつ取得条件の3100件以内だった場合は取得処理を実行、それ以外はメッセージを出して終了させる。なお、パラメータに何らかの問題があると大量のヒット件数が返されることがある。
     if total_num > 3100:
         print(f"データ取得上限の件数を超えているか入力パラメータが不適なため、取得処理をスキップします。市区町村コードなどで条件を細分化してください。")
     elif total_num > 0:
-        fetch_data(params_02, total_num, prefectures[p_ac])
+        fetch_data(params_02, total_num, p_ac, output_dir)
     else:
         print(f"該当するデータがありません。")
