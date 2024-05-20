@@ -26,7 +26,7 @@ prefectures = {
 
 #URLパラメータ用の辞書を用意し、後からパラメータを順次格納する。01はヒット総数の確認用、02はデータ取得用。
 params_01 = {"appid":api_key, "results":1, "output":"json"} 
-params_02 = {"appid":api_key, "output":"json"}
+params_02 = {"appid":api_key, "sort":"kana", "output":"json"} #繰り返し処理でID重複が生じる可能性を低減するためソート順を「かな」に設定
 
 #パラメータを対話的に入力する
 p_query = input('検索する文字列を入力（Enterキーでスキップ） >> ')
@@ -54,6 +54,7 @@ else:
 def count_data(params_01):
     response_01 = requests.get(base_url, params=params_01) #ヒット件数の確認用のリクエストを投げる処理
     jsonData_01 = response_01.json()
+    time.sleep(0.5) #リクエスト１回ごとに若干時間をあけてAPI側への負荷を軽減する
     return jsonData_01["ResultInfo"]["Total"]
 
 #データ取得処理用の関数
